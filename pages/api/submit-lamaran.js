@@ -11,10 +11,23 @@ export const config = {
   },
 };
 
+// Fungsi untuk membuat direktori jika belum ada
+const ensureDirExists = (dirPath) => {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+};
+
 async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Method not allowed' });
   }
+  
+  // --- PERUBAHAN DIMULAI DI SINI ---
+  // Tentukan direktori upload. Di Vercel, kita bisa menulis ke /tmp
+  const uploadDir = '/tmp/uploads';
+  ensureDirExists(uploadDir);
+  // --- PERUBAHAN SELESAI DI SINI ---
 
   try {
     const auth = new google.auth.GoogleAuth({
@@ -31,7 +44,13 @@ async function handler(req, res) {
     const drive = google.drive({ version: 'v3', auth });
     const sheets = google.sheets({ version: 'v4', auth });
 
-    const form = new IncomingForm();
+    // --- PERUBAHAN PADA KONFIGURASI FORMIDABLE ---
+    const form = new IncomingForm({
+      uploadDir: uploadDir,
+      keepExtensions: true,
+      maxFileSize: 5 * 1024 * 1024, // 5MB limit
+    });
+
     const { fields, files } = await new Promise((resolve, reject) => {
       form.parse(req, (err, fields, files) => {
         if (err) return reject(err);
@@ -39,27 +58,21 @@ async function handler(req, res) {
       });
     });
 
-    // --- PERUBAHAN DIMULAI DI SINI ---
-    
-    // Ambil file dari hasil parse. `formidable` versi baru mungkin menaruhnya dalam array.
     const cvFile = Array.isArray(files.cv) ? files.cv[0] : files.cv;
 
-    // VALIDASI KRUSIAL: Pastikan file ada dan memiliki filepath
+    // Validasi yang sudah ada tetap dipertahankan
     if (!cvFile || !cvFile.filepath) {
+      console.error('File CV tidak ditemukan setelah parsing form.', files);
       return res.status(400).json({ message: 'File CV tidak ditemukan atau gagal diunggah. Mohon coba lagi.' });
     }
 
     const { nama, no_hp, email, posisi } = fields;
     
-    // VALIDASI KRUSIAL: Pastikan field teks juga ada
     if (!nama || !no_hp || !email || !posisi) {
       return res.status(400).json({ message: 'Semua data formulir wajib diisi.' });
     }
     
-    // --- PERUBAHAN SELESAI DI SINI ---
-
     const fileExtension = path.extname(cvFile.originalFilename || 'file');
-    // Ambil nama dari field, bukan dari properti file, agar lebih konsisten
     const fileName = `${Array.isArray(nama) ? nama[0] : nama} - ${Array.isArray(posisi) ? posisi[0] : posisi} - CV${fileExtension}`;
 
     const fileMetadata = {
@@ -69,7 +82,7 @@ async function handler(req, res) {
 
     const media = {
       mimeType: cvFile.mimetype,
-      body: fs.createReadStream(cvFile.filepath), // Sekarang cvFile.filepath dijamin ada
+      body: fs.createReadStream(cvFile.filepath), // filepath sekarang seharusnya sudah valid
     };
 
     const driveResponse = await drive.files.create({
@@ -77,6 +90,9 @@ async function handler(req, res) {
       media: media,
       fields: 'id, webViewLink',
     });
+
+    // Hapus file sementara setelah berhasil diunggah ke Drive
+    fs.unlinkSync(cvFile.filepath);
 
     const fileLink = driveResponse.data.webViewLink;
 

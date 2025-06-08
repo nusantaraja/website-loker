@@ -1,4 +1,5 @@
 // File: pages/api/submit-lamaran.js
+// Versi ini sudah memperbaiki typo `upload_dir` menjadi `uploadDir`
 
 import { google } from 'googleapis';
 import { IncomingForm } from 'formidable';
@@ -26,8 +27,22 @@ async function handler(req, res) {
   ensureDirExists(uploadDir);
 
   try {
+    const auth = new google.auth.GoogleAuth({
+        credentials: {
+            client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+            private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        },
+        scopes: [
+            'https://www.googleapis.com/auth/drive.file',
+            'https://www.googleapis.com/auth/spreadsheets',
+        ],
+    });
+
+    const drive = google.drive({ version: 'v3', auth });
+    const sheets = google.sheets({ version: 'v4', auth });
+
     const form = new IncomingForm({
-      uploadDir: upload_dir, // **[EDIT]** Maaf, ada typo di sini, seharusnya uploadDir
+      uploadDir: uploadDir, // <--- SUDAH DIPERBAIKI
       keepExtensions: true,
       maxFileSize: 5 * 1024 * 1024,
     });
@@ -40,7 +55,7 @@ async function handler(req, res) {
     });
 
     // =================================================================
-    // >>>>>>>>>> INI ADALAH BAGIAN DEBUGGING YANG PALING PENTING <<<<<<<<<<
+    // >>>>>>>>>> BLOK DEBUGGING TETAP DIPERTAHANKAN <<<<<<<<<<
     // =================================================================
     console.log("--- DEBUGGING FORM DATA ---");
     console.log("Isi dari 'fields':", JSON.stringify(fields, null, 2));
@@ -51,15 +66,16 @@ async function handler(req, res) {
     const cvFile = Array.isArray(files.cv) ? files.cv[0] : files.cv;
 
     if (!cvFile || !cvFile.filepath) {
-      console.error('Kondisi !cvFile || !cvFile.filepath terpenuhi.');
-      return res.status(400).json({ message: 'File CV tidak ditemukan atau gagal diunggah. Mohon coba lagi.' });
+      console.error('Kondisi !cvFile || !cvFile.filepath terpenuhi. File tidak valid.');
+      return res.status(400).json({ message: 'File CV tidak valid atau gagal diunggah.' });
     }
 
     const { nama, no_hp, email, posisi } = fields;
     
-    // ... Sisa kode sama persis ...
-    // (Anda bisa salin sisa kode dari versi sebelumnya, atau saya bisa berikan lagi jika perlu)
-
+    if (!nama || !no_hp || !email || !posisi) {
+      return res.status(400).json({ message: 'Semua data formulir wajib diisi.' });
+    }
+    
     const fileExtension = path.extname(cvFile.originalFilename || 'file');
     const fileName = `${Array.isArray(nama) ? nama[0] : nama} - ${Array.isArray(posisi) ? posisi[0] : posisi} - CV${fileExtension}`;
 
@@ -72,9 +88,6 @@ async function handler(req, res) {
       mimeType: cvFile.mimetype,
       body: fs.createReadStream(cvFile.filepath),
     };
-
-    const drive = google.drive({ version: 'v3', auth: req.auth });
-    const sheets = google.sheets({ version: 'v4', auth: req.auth });
 
     const driveResponse = await drive.files.create({
       resource: fileMetadata,
@@ -116,25 +129,4 @@ async function handler(req, res) {
   }
 }
 
-// Perlu middleware untuk autentikasi Google di setiap request
-const withGoogleAuth = (handler) => async (req, res) => {
-    try {
-        const auth = new google.auth.GoogleAuth({
-            credentials: {
-                client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-                private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-            },
-            scopes: [
-                'https://www.googleapis.com/auth/drive.file',
-                'https://www.googleapis.com/auth/spreadsheets',
-            ],
-        });
-        req.auth = auth; // Menyimpan auth di object request
-        return handler(req, res);
-    } catch (error) {
-        console.error('Google Auth Middleware Error:', error);
-        return res.status(500).json({ message: 'Authentication failed.' });
-    }
-};
-
-export default withGoogleAuth(handler);
+export default handler;

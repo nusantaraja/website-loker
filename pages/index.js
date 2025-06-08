@@ -79,7 +79,7 @@ export default function HomePage() {
 
           <div className={styles.inputGroup}>
             <label htmlFor="cv">Upload CV (PDF, max 5MB)</label>
-            <input type="file" id="cv" name="cv" accept=".pdf" required /> // Menambahkan atribut accept
+            <input type="file" id="cv" name="cv" accept=".pdf" required /> 
           </div>
 
           <button type="submit" className={styles.button} disabled={isSubmitting}>
